@@ -253,7 +253,7 @@ nano .env
 **Важно**:
 - Замените все значения на свои
 - Удалите строки провайдеров, которых у вас нет
-- Имена провайдеров в NAMES должны совпадать с именами в переменных JACKETT_{name}_URL / PROWLARR_{name}_URL
+- Имена провайдеров в NAMES должны совпадать с именами в переменных `JACKETT_{name}_URL / PROWLARR_{name}_URL`
 - Если в NAMES указан провайдер, для которого нет URL и API_KEY, IndexBridge запустится, но этот провайдер будет пропущен.
 
 `PROXY_API_KEY=ваш-секретный-ключ`  
@@ -309,7 +309,7 @@ services:
       - CB_MAX_FAILS=3
       - CB_TIMEOUT=300
 ```
-**Важно**: удалите из environment строки провайдеров, которые вы не используете. Для каждого провайдера из NAMES должны быть заданы JACKETT_{name}_URL и JACKETT_{name}_API_KEY (или PROWLARR_{name}_URL и PROWLARR_{name}_API_KEY).
+**Важно**: удалите из environment строки провайдеров, которые вы не используете. Для каждого провайдера из NAMES должны быть заданы `JACKETT_{name}_URL` и `JACKETT_{name}_API_KEY` (или `PROWLARR_{name}_URL` и `PROWLARR_{name}_API_KEY`).
 
 ### 4. Проверка
 
