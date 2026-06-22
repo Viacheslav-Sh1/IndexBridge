@@ -251,7 +251,7 @@ nano .env
 **Important**:
 - Replace all values ​​with your own  
 - Remove lines for providers you don't have  
-- Provider names in NAMES must match the names in the JACKETT_{name}_URL / PROWLARR_{name}_URL variables  
+- Provider names in NAMES must match the names in the `JACKETT_{name}_URL` / `PROWLARR_{name}_URL` variables  
 - If NAMES specifies a provider for which there is no URL and API_KEY, IndexBridge will start, but that provider will be skipped.  
 
 `PROXY_API_KEY=your-secret-key`  
@@ -308,7 +308,7 @@ services:
       - CB_TIMEOUT=300
 ```
 
-**Important**: Remove the provider lines you don't use from the environment variable. JACKETT_{name}_URL and JACKETT_{name}_API_KEY (or PROWLARR_{name}_URL and PROWLARR_{name}_API_KEY) must be defined for each provider in NAMES.
+**Important**: Remove the provider lines you don't use from the environment variable. `JACKETT_{name}_URL` and `JACKETT_{name}_API_KEY` (or `PROWLARR_{name}_URL` and `PROWLARR_{name}_API_KEY`) must be defined for each provider in NAMES.
 
 ### 4. Verification
 
