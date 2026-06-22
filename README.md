@@ -2,7 +2,7 @@
 
 # IndexBridge
 
-A universal torrent index aggregator that acts as a middleware layer for Jackett, Prowlarr, and Jacred.
+A universal torrent indexer aggregator that acts as a middleware layer for Jackett, Prowlarr, and Jacred.
 
 It combines results from Jackett, Prowlarr, and Jacred, providing a single API with filtering, deduplication, and metadata normalization.
 
@@ -71,9 +71,10 @@ Additional metadata becomes available:
 - Audio information
 - Extra metadata for the client
 
-IndexBridge does not replace Jackett and does not modify the releases themselves. It only supplements the results with metadata extracted from the release title.
-The screenshots below were taken in the Lampa client and show the actual results of IndexBridge.
-(screenshot)
+IndexBridge does not replace Jackett and does not modify the releases themselves. It only supplements the results with metadata extracted from the release title.  
+The screenshots below were taken in the Lampa client and show the actual results of IndexBridge.  
+
+
 ![Jackett via IndexBridge](docs/images/jackett-vs-indexbridge.webp)
 
 ---
@@ -86,8 +87,9 @@ IndexBridge can simultaneously aggregate Jackett, Prowlarr, and Jacred.
 - Filtering is performed;
 - Most duplicates are removed automatically;
 - Jacred metadata is preserved unchanged;
-- For Jackett and Prowlarr results, missing data is extracted from the headers.
-(screenshot)
+- For Jackett and Prowlarr results, missing data is extracted from the headers.  
+
+
 ![Combined output from multiple sources](docs/images/multi-provider.webp)
 
 > Deduplication does not guarantee the complete removal of all duplicates. If different sources return inconsistent or incomplete identifiers, identical releases may appear in the final output.
@@ -152,9 +154,9 @@ If a duplicate is found, the selection is based on one of two rules:
 
 ### Deduplication Limitations
 
-If different providers return incomplete or inconsistent identifiers, some duplicate releases may still remain in the results.
-This is expected behavior. Preference is given to preserving available releases rather than aggressively removing potential duplicates.
-If there are too many duplicates, you can:
+If different providers return incomplete or inconsistent identifiers, some duplicate releases may still remain in the results.  
+This is expected behavior. Preference is given to preserving available releases rather than aggressively removing potential duplicates.  
+If there are too many duplicates, you can:  
 - Disable `PROVIDER_PRIORITY`;
 - use only one source for a specific tracker;
 - create an issue with examples.
@@ -182,27 +184,27 @@ This prevents freezing: the problematic provider does not slow down queries to o
 CB_MAX_FAILS=3 # number of consecutive errors to disconnect (default 3)
 CB_TIMEOUT=300 # disconnection time in seconds (default 300 = 5 minutes)
 ```
-How it works:
-The provider responds with an error or fails to meet the PROVIDER_TIMEOUT limit.
-After CB_MAX_FAILS consecutive errors, the provider is temporarily excluded from polling for CB_TIMEOUT seconds.
+How it works:  
+The provider responds with an error or fails to meet the PROVIDER_TIMEOUT limit.  
+After CB_MAX_FAILS consecutive errors, the provider is temporarily excluded from polling for CB_TIMEOUT seconds.  
 
-The following entry appears in the logs:
-WARNING: [jac] circuit breaker OPEN for 300s
-After the time expires, the provider is queried again.
+The following entry appears in the logs:  
+WARNING: [jac] circuit breaker OPEN for 300s  
+After the time expires, the provider is queried again.  
 
-### Provider Priority
-The order in which providers are preferred during deduplication.
-The first in the list has the highest priority.
+### Provider Priority  
+The order in which providers are preferred during deduplication.  
+The first in the list has the highest priority.  
 
 ```env
 PROVIDER_PRIORITY=jac,jred,pr # jac > jred > pr
 ```
 
-If a duplicate is found, the result from the provider with the highest priority is retained.
-If no priority is specified, the priority is based on the number of seeders.
+If a duplicate is found, the result from the provider with the highest priority is retained.  
+If no priority is specified, the priority is based on the number of seeders.  
 
-Example:
-The same release was found on two providers:
+Example:  
+The same release was found on two providers:  
 
 | Provider | Seeders |
 |-----|----|
@@ -217,8 +219,8 @@ Priority is useful when:
 - You want to prefer a trusted source.
 - Jacred reports outdated seeder counts, so you can place it lower in the list and keep fresher data from Jackett or Prowlarr.
 
-**How many providers can be configured?**
-Technically, there is no limit imposed by `NAMES`.
+**How many providers can be configured?**  
+Technically, there is no limit imposed by `NAMES`.  
 
 Performance characteristics:
 
@@ -229,12 +231,12 @@ Performance characteristics:
 | 15-30 | ⚠️ Possible delays | Increase timeout (not yet tested) |
 | 30+ | ⚠️ Experimental | CPU and memory requirements have not been tested |
 
-Response time is approximately equal to the response time of the slowest provider plus processing overhead (~100-200ms).
-Response time is not equal to the sum of the response times of all sources.
+Response time is approximately equal to the response time of the slowest provider plus processing overhead (~100-200ms).  
+Response time is not equal to the sum of the response times of all sources.  
 
-Example with 5 providers (each ~1 second):
-Sequential requests: ~5 seconds
-IndexBridge (parallel): ~1 second
+Example with 5 providers (each ~1 second):  
+Sequential requests: ~5 seconds  
+IndexBridge (parallel): ~1 second  
 
 ## Quick Start
 
@@ -247,19 +249,19 @@ cp .env.example .env
 nano .env
 ```
 **Important**:
-- Replace all values ​​with your own
-- Remove lines for providers you don't have
-- Provider names in NAMES must match the names in the JACKETT_{name}_URL / PROWLARR_{name}_URL variables
-- If NAMES specifies a provider for which there is no URL and API_KEY, IndexBridge will start, but that provider will be skipped.
+- Replace all values ​​with your own  
+- Remove lines for providers you don't have  
+- Provider names in NAMES must match the names in the JACKETT_{name}_URL / PROWLARR_{name}_URL variables  
+- If NAMES specifies a provider for which there is no URL and API_KEY, IndexBridge will start, but that provider will be skipped.  
 
-PROXY_API_KEY=your-secret-key
-NAMES=jred,jac,pr
-JACKETT_jred_URL=https://remote.example.com
-JACKETT_jred_API_KEY=jred-key
-JACKETT_jac_URL=http://jackett:9117
-JACKETT_jac_API_KEY=abc123
-PROWLARR_pr_URL=http://prowlarr:9696
-PROWLARR_pr_API_KEY=def456
+`PROXY_API_KEY=your-secret-key`  
+`NAMES=jred,jac,pr`  
+`JACKETT_jred_URL=https://remote.example.com`  
+`JACKETT_jred_API_KEY=jred-key`  
+`JACKETT_jac_URL=http://jackett:9117`  
+`JACKETT_jac_API_KEY=abc123`  
+`PROWLARR_pr_URL=http://prowlarr:9696`  
+`PROWLARR_pr_API_KEY=def456`  
 
 ### 3. Build and run the container
 **Option 1 - Docker**
@@ -330,13 +332,13 @@ API Endpoints:
 
 ## Authorization
 
-All requests require an API key:
-**Query parameter**
-?apikey=your-key
+All requests require an API key:  
+**Query parameter**  
+?apikey=your-key  
 
-**Header**
-X-API-Key: your-key
-An invalid or missing key returns a 404 Not Found.
+**Header**  
+X-API-Key: your-key  
+An invalid or missing key returns a 404 Not Found.  
 
 ## Configuration
 
@@ -349,20 +351,20 @@ An invalid or missing key returns a 404 Not Found.
 
 ### Configuring Providers
 
-**Jackett (including Jacred as a Jackett-compatible server)**
-JACKETT_{name}_URL=http://host:9117
-JACKETT_{name}_API_KEY=key
+**Jackett (including Jacred as a Jackett-compatible server)**  
+`JACKETT_{name}_URL=http://host:9117`  
+`JACKETT_{name}_API_KEY=key`  
 
-**Prowlarr**
-PROWLARR_{name}_URL=http://host:9696
-PROWLARR_{name}_API_KEY=key
+**Prowlarr**  
+`PROWLARR_{name}_URL=http://host:9696`  
+`PROWLARR_{name}_API_KEY=key`  
 
-**Important**: Jacred connects as a regular Jackett provider.
-IndexBridge will automatically detect that the response is already in Jacred format and will not re-parse the headers.
+**Important**: Jacred connects as a regular Jackett provider.  
+IndexBridge will automatically detect that the response is already in Jacred format and will not re-parse the headers.  
 
-You can add as many providers as you like. All are queried in parallel.
+You can add as many providers as you like. All are queried in parallel.  
 
-Example with 6 Providers:
+Example with 6 Providers:  
 
 ```env
 NAMES=jac1,jac2,jac3,pr1,pr2,jred1
@@ -396,8 +398,8 @@ JACKETT_jred1_API_KEY=jred1-key
 | CB_TIMEOUT | 300 | Provider disconnection time (sec) |
 | PROVIDER_PRIORITY | — | Provider priority for deduplication: jac, jred, pr |
 
-How to change:
-In .env:
+How to change:  
+In .env:  
 ```env
 PROVIDER_TIMEOUT=30
 RSS_CACHE_TTL=600
@@ -405,7 +407,7 @@ CB_MAX_FAILS=5
 CB_TIMEOUT=600
 PROVIDER_PRIORITY=jac,jred,pr
 ```
-Or in docker-compose.yml:
+Or in docker-compose.yml:  
 ```yml
 environment:
 - PROVIDER_TIMEOUT=30
@@ -414,14 +416,14 @@ environment:
 - CB_TIMEOUT=600
 - PROVIDER_PRIORITY=jac,jred,pr
 ```
-After changing the settings, restart the container.
+After changing the settings, restart the container.  
 
-**Recommendations:**
-Local providers: PROVIDER_TIMEOUT=10-15, remote: 15-30
-RSS_CACHE_TTL no less than the RSS client polling interval (usually 300)
-CB_MAX_FAILS=3 and CB_TIMEOUT=300 — good default values
-PROVIDER_PRIORITY — list the most trusted source first
-Reduce PROVIDER_TIMEOUT if you prefer fast partial results instead of waiting for everything
+**Recommendations:**  
+Local providers: PROVIDER_TIMEOUT=10-15, remote: 15-30  
+RSS_CACHE_TTL no less than the RSS client polling interval (usually 300)  
+CB_MAX_FAILS=3 and CB_TIMEOUT=300 — good default values  
+PROVIDER_PRIORITY — list the most trusted source first  
+Reduce PROVIDER_TIMEOUT if you prefer fast partial results instead of waiting for everything  
 
 ### Additional Options
 
@@ -454,39 +456,39 @@ Reduce PROVIDER_TIMEOUT if you prefer fast partial results instead of waiting fo
 
 ### Security
 
-- API key required for all requests
-- Per-IP rate limiting
-- Swagger/OpenAPI disabled
-- Server header hidden
-- Security headers: X-Content-Type-Options, X-Frame-Options, Cache-Control: no-store
-- `hmac.compare_digest` for secure key comparison
+- API key required for all requests  
+- Per-IP rate limiting  
+- Swagger/OpenAPI disabled  
+- Server header hidden  
+- Security headers: X-Content-Type-Options, X-Frame-Options, Cache-Control: no-store  
+- `hmac.compare_digest` for secure key comparison  
 
-## Integration with other applications
-As a Jackett indexer
-Add as Torznab:
-URL: http://indexbridge:8000/all — for aggregated results
-URL: http://indexbridge:8000/name — for a specific provider
-API Key: your PROXY_API_KEY
+## Integration with other applications  
+As a Jackett indexer  
+Add as Torznab:  
+URL: http://indexbridge:8000/all — for aggregated results  
+URL: http://indexbridge:8000/name — for a specific provider  
+API Key: your PROXY_API_KEY  
 
-As a Prowlarr indexer
-Add as a Custom Torznab:
-URL: http://indexbridge:8000/all — for aggregated results
-URL: http://indexbridge:8000/name — for a specific provider
-API Key: your PROXY_API_KEY
+As a Prowlarr indexer  
+Add as a Custom Torznab:  
+URL: http://indexbridge:8000/all — for aggregated results  
+URL: http://indexbridge:8000/name — for a specific provider  
+API Key: your PROXY_API_KEY  
 
-### Typical Scenarios
-- Multiple Jackett instances → one IndexBridge → client
-- Multiple Prowlarr instances → one IndexBridge → client
-- Multiple Jacred instances → one IndexBridge → client
-- Mixed sources via a single API
-- A single external entry point instead of exposing multiple services
-- Unified filtering and deduplication
-- A single API endpoint for multiple indexers
+### Typical Scenarios  
+- Multiple Jackett instances → one IndexBridge → client  
+- Multiple Prowlarr instances → one IndexBridge → client  
+- Multiple Jacred instances → one IndexBridge → client  
+- Mixed sources via a single API  
+- A single external entry point instead of exposing multiple services  
+- Unified filtering and deduplication  
+- A single API endpoint for multiple indexers  
 
 > [!IMPORTANT]
-> IndexBridge does not replace Jackett, Prowlarr, or Jacred.
+> IndexBridge does not replace Jackett, Prowlarr, or Jacred.  
 >
-> It does not perform indexing and does not search for releases on its own.
+> It does not perform indexing and does not search for releases on its own.  
 >
 > IndexBridge acts as a middleware layer between indexers and clients, providing aggregation, filtering, deduplication, and metadata normalization.
 
