@@ -118,8 +118,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             parts = path.strip("/").split("/")
 
+            # Короткий путь: /name
             if len(parts) == 1 and parts[0]:
                 is_allowed = True
+            # Torznab без имени: /api/v2.0/indexers/all/results
+            elif len(parts) == 5:
+                if parts == ["api", "v2.0", "indexers", "all", "results"]:
+                    is_allowed = True
+            # Полный путь: /name/api/v2.0/indexers/all/results
             elif len(parts) == 6:
                 if parts[1:] == ["api", "v2.0", "indexers", "all", "results"]:
                     is_allowed = True
@@ -171,6 +177,7 @@ def add_security(app: FastAPI) -> FastAPI:
         logger.info("Isolation: separate lock per IP")
         logger.info("Cleanup: stale IPs removed every 5 min")
     logger.info("Healthcheck: /health (no auth)")
+    logger.info("Torznab: /api/v2.0/indexers/all/results")
     logger.info("=" * 60)
 
     return app
