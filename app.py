@@ -201,6 +201,12 @@ async def health():
     return JSONResponse(content={"status": "ok"})
 
 
+@app.get("/api/v2.0/indexers/all/results")
+async def root_torznab(request: Request):
+    """Запросы без имени провайдера → объединённый результат."""
+    return await _combined_results(request)
+
+
 @app.get("/{name}")
 async def short_endpoint(name: str, request: Request):
     """Короткий эндпоинт: /all, /jac, /tst, /prowlarr"""
@@ -270,7 +276,6 @@ async def _combined_results(request: Request):
 
     provider_names = list(JACKETTS.keys()) + list(PROWLARRS.keys())
 
-    # Создаём задачи только для неотключенных провайдеров
     tasks = []
     task_names = []
     for name in provider_names:
@@ -299,7 +304,6 @@ async def _combined_results(request: Request):
 
     unique = deduplicate(combined)
 
-    # Сохраняем в кеш если это RSS
     if not has_query:
         _RSS_CACHE["rss"] = {"data": unique, "time": time.monotonic()}
 
@@ -375,6 +379,7 @@ if __name__ == "__main__":
     for name in PROWLARRS:
         logger.info(f"   • /{name} (Prowlarr)")
     logger.info(f"   • /{COMBINED_NAME} (объединённый)")
+    logger.info(f"   • /api/v2.0/indexers/all/results (Torznab)")
     logger.info("")
     logger.info(f"✅ Также доступны полные пути:")
     for name in JACKETTS:
