@@ -322,12 +322,18 @@ curl "http://localhost:8000/jac?apikey=your-secret-key&Query=Foundation"
 curl "http://localhost:8000/all?apikey=your-secret-key&Query=Foundation"
 ```
 
+**Torznab-compatible path (without provider name)**  
+```bash
+curl "http://localhost:8000/api/v2.0/indexers/all/results?apikey=your-secret-key&Query=Foundation"
+```
+
 API Endpoints:
 
 | Endpoint | Description |
 |------------|-------------|
 | /{name} | Results from a single provider |
 | /{name}/api/v2.0/indexers/all/results | Jackett-compatible path |
+|/api/v2.0/indexers/all/results | Torznab without a name (combined) |
 | /{COMBINED_NAME} | Combined results from all providers (default: /all) |
 
 ## Authorization
@@ -474,6 +480,10 @@ As a Prowlarr indexer
 Add as a Custom Torznab:  
 URL: http://indexbridge:8000/all — for aggregated results  
 URL: http://indexbridge:8000/name — for a specific provider  
+API Key: your PROXY_API_KEY  
+
+As a Torznab indexer (for Sonarr, Radarr, Lidarr):  
+URL: http://indexbridge:8000/api/v2.0/indexers/all/results — for aggregated results  
 API Key: your PROXY_API_KEY  
 
 ### Typical Scenarios  
