@@ -323,12 +323,17 @@ curl "http://localhost:8000/jac?apikey=ваш-секретный-ключ&Query=
 curl "http://localhost:8000/all?apikey=ваш-секретный-ключ&Query=Foundation"
 ```
 
+**Torznab-совместимый путь (без имени провайдера)**
+```bash
+curl "http://localhost:8000/api/v2.0/indexers/all/results?apikey=ваш-секретный-ключ&Query=Foundation"
+```
 API эндпоинты:
 
 | Эндпоинт | Описание |
 |------------|--------------|
 | /{имя} | Результаты одного провайдера |
 | /{имя}/api/v2.0/indexers/all/results | Jackett-совместимый путь |
+| /api/v2.0/indexers/all/results | Torznab без имени (объединённый) |
 | /{COMBINED_NAME} | Объединённые результаты со всех провайдеров (по умолчанию /all) |
 
 ## Авторизация
@@ -475,6 +480,10 @@ API Key: ваш PROXY_API_KEY
 Добавьте как Custom Torznab:  
 URL: http://indexbridge:8000/all — для объединённых результатов  
 URL: http://indexbridge:8000/имя — для конкретного провайдера  
+API Key: ваш PROXY_API_KEY  
+
+**Как Torznab-индексатор (для Sonarr, Radarr, Lidarr)**  
+URL: http://indexbridge:8000/api/v2.0/indexers/all/results — для объединённых результатов  
 API Key: ваш PROXY_API_KEY  
 
 ### Типовые сценарии
