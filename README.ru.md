@@ -483,7 +483,7 @@ URL: http://indexbridge:8000/имя — для конкретного прова
 API Key: ваш PROXY_API_KEY  
 
 **Как Torznab-индексатор (для Sonarr, Radarr, Lidarr)**  
-URL: http://indexbridge:8000/api/v2.0/indexers/all/results — для объединённых результатов  
+URL: http://indexbridge:8000 — для объединённых результатов  
 API Key: ваш PROXY_API_KEY  
 
 ### Типовые сценарии
