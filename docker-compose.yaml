@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  indexbridge:
+    build: .
+    image: indexbridge:latest
+    container_name: indexbridge
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      # ==== ОСНОВНЫЕ =====
+      - PROXY_API_KEY=${PROXY_API_KEY}
+      - TZ=Europe/Kyiv
+      - PORT=8000
+      # Имя объединённого эндпоинта
+      - COMBINED_NAME=all
+      # ==== ПРОВАЙДЕРЫ =====
+      - NAMES=${NAMES}
+      # - PROVIDER_PRIORITY=jac,pr
+      # Укажите своих провайдеров, удалите неиспользуемые
+      - JACKETT_jac_URL=${JACKETT_jac_URL}
+      - JACKETT_jac_API_KEY=${JACKETT_jac_API_KEY}
+      - PROWLARR_pr_URL=${PROWLARR_pr_URL}
+      - PROWLARR_pr_API_KEY=${PROWLARR_pr_API_KEY}
+      # ==== БЕЗОПАСНОСТЬ =====
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_REQUESTS=60
+      - RATE_LIMIT_WINDOW=60
+      # ==== ФИЛЬТРЫ =====
+      - FILTER_MIN_SEEDERS=1
+      - FILTER_MAX_SEEDERS=0
+      - FILTER_MIN_PEERS=0
+      - FILTER_LANGUAGES=
+      - FILTER_VOICES=
+      - FILTER_BLACKLIST_TITLES=
+      - FILTER_QUALITY_MIN=0
+      - FILTER_QUALITY_MAX=9999
+      # ==== ПРОИЗВОДИТЕЛЬНОСТЬ =====
+      - PROVIDER_TIMEOUT=15
+      - RSS_CACHE_TTL=300
+      - CB_MAX_FAILS=3
+      - CB_TIMEOUT=300
