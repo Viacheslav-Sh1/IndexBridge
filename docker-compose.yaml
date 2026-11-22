@@ -37,8 +37,28 @@ services:
       - FILTER_BLACKLIST_TITLES=
       - FILTER_QUALITY_MIN=0
       - FILTER_QUALITY_MAX=9999
+      # Проверка релевантности Jackett/Prowlarr по названию и году (on/off)
+      - FILTER_RELEVANCE=on
       # ==== ПРОИЗВОДИТЕЛЬНОСТЬ =====
       - PROVIDER_TIMEOUT=15
       - RSS_CACHE_TTL=300
       - CB_MAX_FAILS=3
       - CB_TIMEOUT=300
+      # ==== USER-AGENT =====
+      # on — передавать User-Agent клиента; off — всегда использовать PROVIDER_USER_AGENT (или встроенный Chrome)
+      - FORWARD_USER_AGENT=on
+      # - PROVIDER_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
+      # ==== ПРОКСИ (необязательно) =====
+      # Прокси для внешних провайдеров (используйте socks5://, не socks5h://).
+      # В NO_PROXY перечислите хосты ваших локальных Jackett/Prowlarr.
+      # - ALL_PROXY=socks5://user:password@host:1080
+      # - NO_PROXY=192.168.1.10,localhost,127.0.0.1
+    # Если прокси запущен в другой Docker-сети — подключите её:
+    # networks:
+    #   - default
+    #   - proxy-net
+
+# networks:
+#   proxy-net:
+#     external: true
+#     name: имя_сети   # смотрите в `docker network ls`
