@@ -5,7 +5,9 @@
 import os
 import re
 import logging
-from typing import List, Tuple, Dict, Any
+import math
+import unicodedata
+from typing import List, Tuple, Dict, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -484,6 +486,186 @@ def should_filter_item(item: dict, voices: List[str], languages: List[str], vide
         return True
     return False
 
+# ==================== РЕЛЕВАНТНОСТЬ ЗАПРОСУ ====================
+# Jackett/Prowlarr иногда возвращают раздачи, не связанные с запросом (например, свежие
+# релизы, когда по запросу ничего не найдено). Правила те же, что у JacRed:
+#   1. Название: полное равенство после нормализации (регистр, ё/е, знаки и пробелы не важны)
+#      одного из названий запроса (Query, title, title_original) и одного из названий раздачи
+#      (части заголовка через «/»). Совпадение по отдельным словам или части названия не считается.
+#   2. Год (если он есть и в запросе, и в заголовке раздачи):
+#        фильмы  — год раздачи в пределах year ± 1;
+#        сериалы — наибольший год раздачи не меньше year − 1 (верхней границы нет).
+#      Нет года в заголовке — раздача проходит.
+#   3. Фильмы: заголовки с «сезон» / «серии» отбрасываются.
+# Если точных совпадений нет, ответ пустой (без отката к поиску по вхождению).
+# Заголовок раздачи НЕ изменяется: нормализация нужна только для сравнения.
+#   off — не проверять; любое другое значение (on, loose, strict) — проверять
+
+FILTER_RELEVANCE = os.getenv("FILTER_RELEVANCE", "on").strip().lower()
+if FILTER_RELEVANCE in ("0", "false", "no"):
+    FILTER_RELEVANCE = "off"
+
+_YEAR_RE = re.compile(r"(?<!\w)((?:19|20)\d{2})(?!\w)")
+_EPISODE_RE = re.compile(r"\bs\d{1,2}(?:e\d{1,3})?\b", re.IGNORECASE)
+_3D_RE = re.compile(r"(?<!\w)3D(?!\w)", re.IGNORECASE)
+_SEASON_TAIL_RE = re.compile(r"\s+(?:сезон|season)\s*:?\s*\d+(?:\s*-\s*\d+)?\s*$", re.IGNORECASE)
+_MOVIE_SERIES_MARK_RE = re.compile(r" (сезон|сери(и|я|й))", re.IGNORECASE)
+
+
+def _norm_name(text: str) -> str:
+    """Нормализованное название для сравнения на равенство: NFC, нижний регистр, ё→е,
+    без знаков препинания и пробелов. Буквы любых письменностей (и их диакритика) сохраняются."""
+    text = _3D_RE.sub(" ", unicodedata.normalize("NFC", text or "")).lower().replace("ё", "е")   # «3D» — формат, не название
+    return "".join(ch for ch in text if ch.isalnum() or unicodedata.category(ch)[0] == "M")
+
+
+def _years_in(text: str) -> List[int]:
+    return [int(y) for y in _YEAR_RE.findall(text.replace("_", " "))]
+
+
+def _query_name_keys(raws: List[str], year: Optional[int]) -> set:
+    """Нормализованные названия запроса. SxxExx и год из параметра year в конце запроса отбрасываются."""
+    keys = set()
+    for raw in raws:
+        text = _EPISODE_RE.sub(" ", raw).strip()
+        if year:
+            text = re.sub(r"[\s(\[]*" + str(year) + r"[\s)\]]*$", "", text)
+        key = _norm_name(text)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _release_name_keys(title: str) -> set:
+    """Нормализованные названия раздачи: все части заголовка через «/», а также «(Latin)» в скобках."""
+    keys = set()
+    for name in _name_candidates(title):
+        name = _SEASON_TAIL_RE.sub("", _EPISODE_RE.sub(" ", _strip_series_tail(name))).strip()
+        key = _norm_name(name)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _request_kind(params: Dict[str, Any]) -> str:
+    """movie | series: is_serial от Lampa (1 — фильм, 2 — сериал), иначе по категории; прочее считается сериалом."""
+    serial = str(params.get("is_serial") or "").strip()
+    if serial == "1":
+        return "movie"
+    if serial:
+        return "series"
+    category = str(params.get("Category[]") or params.get("Category") or params.get("cat") or "")
+    if category.startswith("20") and not category.startswith("2010"):
+        return "movie"
+    return "series"
+
+
+def _year_ok(kind: str, year: Optional[int], years: List[int]) -> bool:
+    """Фильмы: год раздачи в пределах year ±1; сериалы: наибольший год не меньше year − 1.
+    Нет года в запросе или в раздаче — проверка пройдена."""
+    if not year or not years:
+        return True
+    if kind == "movie":
+        return any(abs(y - year) <= 1 for y in years)
+    return max(years) >= year - 1
+
+
+def _request_names(params: Dict[str, Any]) -> List[str]:
+    raws: List[str] = []
+    for key in ("Query", "query", "q", "title", "title_original"):
+        value = params.get(key)
+        if value and str(value) not in raws:
+            raws.append(str(value))
+    return raws
+
+
+def _request_year(params: Dict[str, Any]) -> Optional[int]:
+    try:
+        return int(params.get("year") or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_jacred_item(item: Any) -> bool:
+    return isinstance(item, dict) and "ffprobe" in item and "languages" in item and isinstance(item.get("info"), dict)
+
+
+def collect_aliases(raw_items: List[Dict[str, Any]], params: Dict[str, Any]) -> List[str]:
+    """
+    Названия из раздач в формате JacRed, подтверждённые запросом: если info.name или info.originalname
+    раздачи точно равны одному из названий запроса и год подходит, оба названия JacRed считаются
+    названиями этого же произведения (например, украинское ↔ английское). Раздачи JacRed не изменяются,
+    названия живут только внутри одного запроса.
+    """
+    if FILTER_RELEVANCE == "off":
+        return []
+    year = _request_year(params)
+    wanted = _query_name_keys(_request_names(params), year)
+    if not wanted:
+        return []
+    kind = _request_kind(params)
+
+    aliases: List[str] = []
+    seen = set(wanted)
+    for item in raw_items:
+        if not _is_jacred_item(item):
+            continue
+        info = item["info"]
+        names = [info.get("name"), info.get("originalname")]
+        names = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+        if not names or not ({_norm_name(n) for n in names} & wanted):
+            continue
+        released = info.get("relased")
+        years = [released] if isinstance(released, int) and released > 0 else _years_in(str(item.get("Title") or ""))
+        if not _year_ok(kind, year, years):
+            continue
+        for n in names:
+            key = _norm_name(n)
+            if key and key not in seen:
+                seen.add(key)
+                aliases.append(n)
+    return aliases
+
+
+def build_relevance_matcher(params: Dict[str, Any], extra_names: Optional[List[str]] = None
+                            ) -> Optional[Callable[[str], Tuple[bool, str]]]:
+    """
+    Строит функцию title -> (относится ли раздача к запросу, причина) по ИСХОДНЫМ параметрам клиента.
+    extra_names — названия, подтверждённые JacRed (collect_aliases).
+    Возвращает None, если проверять нечего (RSS без запроса, режим off).
+    """
+    if FILTER_RELEVANCE == "off":
+        return None
+
+    year = _request_year(params)
+    raws = _request_names(params)
+    for name in extra_names or []:
+        if name not in raws:
+            raws.append(name)
+
+    wanted = _query_name_keys(raws, year)
+    if not wanted:
+        return None
+
+    kind = _request_kind(params)
+
+    def matches(title: str) -> Tuple[bool, str]:
+        if not _norm_name(title):
+            return False, "empty_title"
+
+        if not (_release_name_keys(title) & wanted):
+            return False, "title_mismatch"
+
+        if kind == "movie" and _MOVIE_SERIES_MARK_RE.search(title):
+            return False, "series_marker_in_movie"
+
+        years = _years_in(title)
+        if not _year_ok(kind, year, years):
+            return False, f"year_mismatch ({', '.join(map(str, sorted(set(years))))} != {year})"
+        return True, "title_match"
+
+    return matches
+
 # ==================== ИНФО ИЗ ЗАГОЛОВКА ====================
 
 def extract_audio_info(title: str, languages: List[str] = None) -> Dict:
@@ -659,33 +841,107 @@ def create_ffprobe(title: str, voices: list, item: Dict = None) -> list:
 
 # ==================== УТИЛИТЫ ====================
 
+_SEASON_PREFIX_RE = re.compile(
+    r'^(?:сезон\w*|season\w*|s\d{1,2}\b|\d+(?:\s*-\s*\d+)?\s*сезон\w*)', re.IGNORECASE)
+_QUALITY_RE = re.compile(
+    r'\b(?:web[-\s]?dl|web[-\s]?rip|bd[-\s]?rip|bd[-\s]?remux|dvd[-\s]?rip|hdtv[-\s]?rip|hd[-\s]?rip|'
+    r'ts[-\s]?rip|cam[-\s]?rip|hdtv|blu[-\s]?ray|remux|uhd|4k|dvd\d?|\d{3,4}p)\b', re.IGNORECASE)
+_QUALITY_UPPER_RE = re.compile(r'\b(?:TS|CAM|TC|HDTS)\b')
+# год считается началом технического хвоста, только если за ним конец, запятая, скобка или тег качества
+_YEAR_TAIL_RE = re.compile(r'\b(?:19|20)\d{2}\b(?=\s*(?:$|[,;)\]|]|[A-Za-z]{2,}|\d{3,4}p\b))')
+_NOT_ORIGINAL_RE = re.compile(r'\b(?:web|dl|rip|bluray|hdtv|dub|mvo|сезон|серии|s\d|e\d|of\s+\d+)\b', re.IGNORECASE)
+
+
+def _head_before_tags(text: str) -> str:
+    """Часть заголовка до технического хвоста (качество, источник, год раздачи)."""
+    cut = len(text)
+    for rx in (_QUALITY_RE, _QUALITY_UPPER_RE, _YEAR_TAIL_RE):
+        for m in rx.finditer(text):
+            if m.start() > 0:
+                cut = min(cut, m.start())
+                break
+    return text[:cut]
+
+
+def _clean_name_part(part: str) -> str:
+    """Название до скобки. Тире внутри названия («Джек – покоритель великанов») сохраняется."""
+    m = re.search(r'\(', part)
+    if m:
+        part = part[:m.start()]
+    return re.sub(r'\s+', ' ', part).strip(' \t,;:-–—|')
+
+
+_SERIES_TAIL_RE = re.compile(
+    r'\s*(?:[-–—]\s*)?(?:(?:сезон|season)\s*:?\s*\d+.*|s\d{1,2}(?:e\d{1,3})?\b.*)$', re.IGNORECASE)
+
+
+def _strip_series_tail(name: str) -> str:
+    """«Game of Thrones - Season 1» → «Game of Thrones»; «Name - S01E01» → «Name»."""
+    return _SERIES_TAIL_RE.sub('', name).strip(' \t,;:-–—|')
+
+
+def _title_head(title: str) -> str:
+    """Часть заголовка раздачи с названиями (без технического хвоста, тегов и префикса сезона)."""
+    t = (title or "").strip()
+
+    # «Сезон 1 | Название ...» — берём часть после префикса; иначе всё после «|» это теги (озвучка и т. п.)
+    parts = [p.strip() for p in t.split('|')]
+    if len(parts) > 1 and parts[1] and _SEASON_PREFIX_RE.match(parts[0]):
+        t = parts[1]
+    else:
+        t = parts[0]
+
+    t = re.sub(r'\[[^\]]*\]?', ' ', t)          # [H.264/1080p], [2026, жанры ...] — теги
+    if ' ' not in t.strip() and t.count('.') >= 2:
+        t = t.replace('.', ' ')                  # Dune.Part.Three.2026.1080p
+    t = re.sub(r'\s+', ' ', t.replace('_', ' ')).strip()
+
+    return _head_before_tags(t)
+
+
+def _latin_in_parens(head: str) -> str:
+    """Латинское название в скобках: «Одиссея (The Odyssey) 2026» → «The Odyssey»."""
+    eng_match = re.search(r'\(([^)]*[a-zA-Z][^)]*)\)', head)
+    if eng_match:
+        candidate = eng_match.group(1).strip()
+        if len(candidate) > 2 and not _QUALITY_RE.search(candidate) and not _NOT_ORIGINAL_RE.search(candidate):
+            return candidate
+    return ""
+
+
+def _name_candidates(title: str) -> List[str]:
+    """Все названия из заголовка раздачи (части через «/» и «(Latin)» в скобках) — только для сравнения."""
+    head = _title_head(title)
+    names = [_clean_name_part(seg) for seg in head.split('/')]
+    latin = _latin_in_parens(head)
+    if latin:
+        names.append(latin)
+    return [n for n in names if n]
+
+
 def extract_names_from_title(title: str) -> tuple:
-    original_title = title
-    clean_title = re.sub(r'^[^|]+\|\s*', '', original_title).strip()
-    match = re.match(r'^([^-/]+?)(?:\s*[-/]|\s+\(|$)', clean_title)
-    name = match.group(1).strip() if match else clean_title.strip()
+    """
+    Русское и оригинальное название из заголовка раздачи. Заголовок не изменяется,
+    результат нужен только для info.name / info.originalname.
+    """
+    head = _title_head(title)
+    segments = head.split('/')
+    name = _clean_name_part(segments[0])
     originalname = ""
-    if '/' in clean_title:
-        parts = clean_title.split('/')
-        if len(parts) > 1:
-            second_part = parts[1].strip()
-            clean_part = re.sub(r'\([^)]*\)', '', second_part)
-            clean_part = re.sub(r'\[[^\]]*\]', '', clean_part)
-            clean_part = re.sub(r'\s+\d{4}\s*', ' ', clean_part)
-            clean_part = re.sub(r'\b(?:web|dl|rip|bluray|hdtv|dub|mvo|сезон|серии|s\d|e\d|of\s+\d+)\b', '', clean_part, flags=re.IGNORECASE)
-            clean_part = re.sub(r'\s+', ' ', clean_part).strip()
-            if clean_part and len(clean_part) > 2: originalname = clean_part
+    if len(segments) > 1:
+        originalname = _clean_name_part(segments[1])
+        if len(originalname) <= 2:
+            originalname = ""
+
     if not originalname:
-        eng_match = re.search(r'\(([^)]*[a-zA-Z][^)]*)\)', clean_title)
-        if eng_match:
-            potential_name = eng_match.group(1).strip()
-            if len(potential_name) > 2 and not re.search(r'\b(?:web|dl|rip|bluray|hdtv|dub|mvo|сезон|серии|s\d|e\d|of\s+\d+)\b', potential_name, re.IGNORECASE): originalname = potential_name
-    if originalname and name:
-        if name.lower().replace(' ', '') == originalname.lower().replace(' ', ''): originalname = ""
-    name = re.sub(r'\s*[-/].*$', '', name)
-    name = re.sub(r'\s*\(.*$', '', name)
-    name = re.sub(r'\s*\d{4}.*$', '', name)
-    name = re.sub(r'\s+', ' ', name).strip()
+        originalname = _latin_in_parens(head)
+
+    name = _strip_series_tail(name) or name
+    originalname = _strip_series_tail(originalname)
+    if originalname and name and name.lower().replace(' ', '') == originalname.lower().replace(' ', ''):
+        originalname = ""
+    if not name:
+        name = _clean_name_part(re.split(r'[|\[(]', title or "")[0])
     return name, originalname
 
 def extract_year_from_title(title: str) -> int:
@@ -725,6 +981,14 @@ def jackett_to_jackred(item: dict) -> dict:
 
     human_readable, seasons, confidence = extract_season_info(original_title)
     name, originalname = extract_names_from_title(original_title)
+    if is_jacred_format:
+        # JacRed уже прислал названия — не пересчитываем их из заголовка
+        source_info = item.get("info")
+        if isinstance(source_info, dict):
+            if source_info.get("name"):
+                name = source_info["name"]
+            if "originalname" in source_info and isinstance(source_info["originalname"], str):
+                originalname = source_info["originalname"]
     released_year = extract_year_from_title(original_title)
 
     is_pack = len(seasons) > 1

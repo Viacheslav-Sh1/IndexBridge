@@ -17,6 +17,8 @@ from core import (
     PROXY_API_KEY,
     jackett_to_jackred,
     should_filter_item,
+    build_relevance_matcher,
+    collect_aliases,
 )
 from providers import fetch_jackett, fetch_prowlarr, prowlarr_to_jackett
 
@@ -33,6 +35,24 @@ CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
 BTIH_RE = re.compile(r"btih:([a-f0-9]{40}|[a-z2-7]{32})", re.IGNORECASE)
 COMBINED_NAME = os.getenv("COMBINED_NAME", "all")
 PROVIDER_TIMEOUT = int(os.getenv("PROVIDER_TIMEOUT", "15"))
+
+# User-Agent для запросов к провайдерам.
+# FORWARD_USER_AGENT=on — User-Agent клиента (если клиент его не прислал — фиксированный);
+# off — всегда фиксированный: PROVIDER_USER_AGENT, а если он не задан — встроенный браузерный.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+)
+FORWARD_USER_AGENT = os.getenv("FORWARD_USER_AGENT", "on").strip().lower() not in ("off", "0", "false", "no")
+PROVIDER_USER_AGENT = os.getenv("PROVIDER_USER_AGENT", "").strip()
+
+
+def resolve_user_agent(request: Request) -> str:
+    """User-Agent, с которым IndexBridge обращается к провайдерам."""
+    fixed = PROVIDER_USER_AGENT or DEFAULT_USER_AGENT
+    if FORWARD_USER_AGENT:
+        return request.headers.get("user-agent") or fixed
+    return fixed
 
 # Приоритет провайдеров при дедупликации
 PROVIDER_PRIORITY_RAW = os.getenv("PROVIDER_PRIORITY", "")
@@ -86,12 +106,27 @@ app = FastAPI(
 
 # ==================== PIPELINE ====================
 
-def process_items(raw_items: list, source_name: str = "") -> tuple[list, int]:
-    """Единый pipeline: конвертация в jacred + фильтрация."""
+def _is_jacred_format(item: dict) -> bool:
+    """Результат уже в формате JacRed (ffprobe/languages/info) — привязан к фильму самим JacRed."""
+    return "ffprobe" in item and "languages" in item and "info" in item
+
+
+def process_items(raw_items: list, source_name: str = "", matcher=None) -> tuple[list, int, int]:
+    """Единый pipeline: проверка релевантности запросу + конвертация в jacred + фильтрация."""
     converted = []
     filtered_count = 0
+    irrelevant_count = 0
 
     for item in raw_items:
+        # Результаты JacRed не проверяем на релевантность, Jackett/Prowlarr — проверяем.
+        # Сам item и его Title при этом не меняются: проверка только решает, пропустить или нет.
+        if matcher is not None and not _is_jacred_format(item):
+            ok, reason = matcher(item.get("Title", ""))
+            if not ok:
+                irrelevant_count += 1
+                logger.debug(f"[{source_name}] DROP: {reason} | {item.get('Title', '?')[:80]}")
+                continue
+
         try:
             result = jackett_to_jackred(item)
             result["_source"] = source_name
@@ -110,7 +145,7 @@ def process_items(raw_items: list, source_name: str = "") -> tuple[list, int]:
         except Exception:
             logger.exception(f"Item error | title: {item.get('Title', '?')[:80]}")
 
-    return converted, filtered_count
+    return converted, filtered_count, irrelevant_count
 
 
 def deduplicate(results: list) -> list:
@@ -184,13 +219,37 @@ async def get_provider_results(name: str, params: dict, user_agent: str = None) 
     raise ProviderNotFound(f"Provider '{name}' not found")
 
 
+async def fetch_provider(name: str, params: dict, user_agent: str = None) -> list:
+    """Получить сырые результаты провайдера. Провайдеру уходит ровно то, что прислал клиент."""
+    return await get_provider_results(name, params, user_agent=user_agent)
+
+
+def process_provider(name: str, raw: list, params: dict, aliases: list = None) -> list:
+    """Обработать результаты одного провайдера; aliases — названия, подтверждённые JacRed."""
+    matcher = build_relevance_matcher(params, extra_names=aliases)
+    converted, filtered, irrelevant = process_items(raw, source_name=name, matcher=matcher)
+    query = params.get("Query") or params.get("query")
+    if query:
+        logger.info(
+            f'[{name}] query="{query}" {len(raw)} → {len(converted)} '
+            f"(filtered {filtered}, irrelevant {irrelevant})"
+        )
+    return converted
+
+
+def aliases_from_results(raw_lists: list, params: dict) -> list:
+    """Названия из раздач в формате JacRed (по всем провайдерам), подтверждённые текущим запросом."""
+    all_raw = [item for raw in raw_lists for item in raw]
+    aliases = collect_aliases(all_raw, params)
+    if aliases:
+        logger.debug(f"Названия из JacRed для запроса: {aliases}")
+    return aliases
+
+
 async def get_and_process_provider(name: str, params: dict, user_agent: str = None) -> list:
     """Получить + обработать одного провайдера."""
-    raw = await get_provider_results(name, params, user_agent=user_agent)
-    converted, filtered = process_items(raw, source_name=name)
-    if params.get("Query") or params.get("query"):
-        logger.info(f"[{name}] {len(raw)} → {len(converted)} (filtered {filtered})")
-    return converted
+    raw = await fetch_provider(name, params, user_agent=user_agent)
+    return process_provider(name, raw, params, aliases_from_results([raw], params))
 
 
 # ==================== ЭНДПОИНТЫ ====================
@@ -228,8 +287,8 @@ async def _handle_provider(name: str, request: Request):
     params = dict(request.query_params)
     params.pop("apikey", None)
 
-    # Извлекаем User-Agent из входящего запроса
-    user_agent = request.headers.get("user-agent")
+    # User-Agent для провайдеров (см. resolve_user_agent)
+    user_agent = resolve_user_agent(request)
 
     if is_circuit_open(name):
         return JSONResponse(
@@ -269,8 +328,8 @@ async def _combined_results(request: Request):
     params = dict(request.query_params)
     params.pop("apikey", None)
 
-    # Извлекаем User-Agent из входящего запроса
-    user_agent = request.headers.get("user-agent")
+    # User-Agent для провайдеров (см. resolve_user_agent)
+    user_agent = resolve_user_agent(request)
 
     # Кеш для RSS (пустых запросов)
     has_query = bool(params.get("Query") or params.get("query"))
@@ -291,15 +350,15 @@ async def _combined_results(request: Request):
         task_names.append(name)
         tasks.append(
             asyncio.wait_for(
-                get_and_process_provider(name, params, user_agent=user_agent),
+                fetch_provider(name, params, user_agent=user_agent),
                 timeout=PROVIDER_TIMEOUT
             )
         )
 
-    all_processed = await asyncio.gather(*tasks, return_exceptions=True)
+    fetched = await asyncio.gather(*tasks, return_exceptions=True)
 
-    combined = []
-    for name, result in zip(task_names, all_processed):
+    raw_by_name = {}
+    for name, result in zip(task_names, fetched):
         if isinstance(result, asyncio.TimeoutError):
             logger.warning(f"[{name}] timeout ({PROVIDER_TIMEOUT}s)")
             circuit_fail(name)
@@ -308,8 +367,19 @@ async def _combined_results(request: Request):
             logger.error(f"[{name}] error: {result}")
             circuit_fail(name)
             continue
+        raw_by_name[name] = result
+
+    aliases = aliases_from_results(list(raw_by_name.values()), params)
+
+    combined = []
+    for name, raw in raw_by_name.items():
+        try:
+            combined.extend(process_provider(name, raw, params, aliases))
+        except Exception as e:
+            logger.error(f"[{name}] error: {e}")
+            circuit_fail(name)
+            continue
         circuit_success(name)
-        combined.extend(result)
 
     unique = deduplicate(combined)
 

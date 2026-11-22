@@ -46,8 +46,8 @@ Additionally, instead of exposing multiple services externally, you can keep the
 **What this gives:**
 
 - **One open port** instead of several
-- **One external API key** — Jackett, Prowlarr, and Jacred API keys never leave the local network.
-- **Hidden infrastructure** — internal addresses and keys are not visible to external clients.
+- **One API key for clients** — clients talk to IndexBridge with a single key; provider addresses and API keys are set only in the server configuration.
+- **Keep the key private** — for torrents without a magnet link, Jackett returns its own download link, which is passed to the client in `MagnetUri` and may contain the Jackett address and API key. Keep the IndexBridge API key secret and do not expose Jackett itself to the internet.
 - **Centralized filtering** — uniform rules for all sources.
 - **Deduplication between providers** — eliminates duplicates before they reach the client.
 - **Change providers without reconfiguring clients** — you can add or remove a source, but the external URL remains the same.
@@ -432,6 +432,74 @@ CB_MAX_FAILS=3 and CB_TIMEOUT=300 — good default values
 PROVIDER_PRIORITY — list the most trusted source first  
 Reduce PROVIDER_TIMEOUT if you prefer fast partial results instead of waiting for everything  
 
+### Proxy for external providers
+
+If an external service (for example Jacred) blocks your IP, outgoing requests can be sent through an HTTP or SOCKS5 proxy (including one behind a VPN). No code changes are needed: the proxy is set with the container's environment variables. The proxy itself runs separately.
+
+```yml
+environment:
+  - ALL_PROXY=socks5://user:password@host:1080   # login and password — if required
+  - NO_PROXY=192.168.1.10,localhost,127.0.0.1
+```
+
+- `ALL_PROXY` — proxy for all requests (`HTTPS_PROXY` and `HTTP_PROXY` are needed only to separate `https://` from `http://`).
+- `NO_PROXY` — hosts that bypass the proxy. **Always list your local Jackett and Prowlarr** (one address per entry; ranges like `192.168.0.0/24` are not guaranteed), otherwise IndexBridge will reach them through the proxy. A container name can be used instead of an IP, but only when IndexBridge and that container share a Docker network.
+- Special characters in the password must be percent-encoded: `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`.
+- Use the `socks5://` scheme. 
+-`socks5h://` is not supported by the current `httpx` version.
+
+**Proxy in Docker.** Attach IndexBridge to the proxy's network and use the proxy container name and its internal port:
+
+```yml
+services:
+  indexbridge:
+    environment:
+      - ALL_PROXY=socks5://proxy-container:1080
+    networks:
+      - default
+      - proxy-net
+
+networks:
+  proxy-net:
+    external: true
+    name: network_name   # see `docker network ls`
+```
+
+If the container uses `network_mode: bridge` (for example in CasaOS), container names are not resolved: remove that line and use `networks` as above.
+
+**Proxy on the host.** Do not use `127.0.0.1:port`: inside the container that is the container itself, and requests fail with `All connection attempts failed`. Use the host's LAN address, and make sure the proxy accepts connections not only from `127.0.0.1`.
+
+**Applying changes.** Changed environment variables are picked up only after the container is recreated: `docker-compose up -d`. SOCKS needs the `httpx[socks]` package (already in `requirements.txt`), so rebuild the image after updating: `docker-compose up -d --build`. If the application files are bind-mounted, installed dependencies in the image are not updated automatically and the image must be rebuilt; for a manual build: `docker build -t image_name .`.
+
+**Verification.** Temporarily set `LOG_LEVEL=DEBUG` and run a search. Look at the connection to the external provider: `connect_tcp.started` should show `host='<proxy address>'`, while a local Jackett shows its own address. Then set `LOG_LEVEL=INFO` again: in DEBUG mode the proxy login and password are printed to the log in plain text.
+
+<details>
+<summary>Common errors</summary>
+
+| Error | Cause and fix |
+|---|---|
+| `Unknown scheme for proxy URL` | The `socks5h://` scheme was used; replace it with `socks5://`. |
+| `socksio` error | The image lacks `httpx[socks]`; rebuild the image. |
+| `All connection attempts failed` | The container cannot reach the proxy: check the address, port, Docker network and that a host proxy is not addressed as `127.0.0.1`. |
+
+</details>
+
+### User-Agent
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| FORWARD_USER_AGENT | on | `on` — use the client's User-Agent when possible; `off` — do not use it |
+| PROVIDER_USER_AGENT | — | Your own User-Agent (optional): a fallback when `on`, always used when `off`. If not set, the built-in Chrome on Windows one is used |
+
+What the provider receives:
+
+| FORWARD_USER_AGENT | PROVIDER_USER_AGENT | User-Agent in the request to the provider |
+|---|---|---|
+| on | set | The client's User-Agent. If the client sent none — the PROVIDER_USER_AGENT value |
+| on | not set | The client's User-Agent. If the client sent none — the built-in Chrome |
+| off | set | Always the PROVIDER_USER_AGENT value |
+| off | not set | Always the built-in Chrome |
+
 ### Additional Options
 
 | Variable | Default | Description |
@@ -452,6 +520,7 @@ Reduce PROVIDER_TIMEOUT if you prefer fast partial results instead of waiting fo
 | FILTER_BLACKLIST_TITLES | — | Prohibited words in title |
 | FILTER_QUALITY_MIN | 0 | Minimum quality |
 | FILTER_QUALITY_MAX | 9999 | Maximum quality |
+| FILTER_RELEVANCE | on | Drop Jackett/Prowlarr releases that do not match the query, using JacRed's rules: `on` / `off`. The name must equal one of the query names (`Query`, `title`, `title_original`) after normalization (case, punctuation and spaces ignored; no partial or per-word matching). Movies: release year within `year` ±1; series: release year at least `year` − 1; a release without a year passes. Movie titles with «сезон»/«серии» are dropped. JacRed-format results are not checked |
 
 ### Rate Limiting
 
