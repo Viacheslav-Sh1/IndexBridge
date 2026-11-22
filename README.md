@@ -445,8 +445,7 @@ environment:
 - `ALL_PROXY` — proxy for all requests (`HTTPS_PROXY` and `HTTP_PROXY` are needed only to separate `https://` from `http://`).
 - `NO_PROXY` — hosts that bypass the proxy. **Always list your local Jackett and Prowlarr** (one address per entry; ranges like `192.168.0.0/24` are not guaranteed), otherwise IndexBridge will reach them through the proxy. A container name can be used instead of an IP, but only when IndexBridge and that container share a Docker network.
 - Special characters in the password must be percent-encoded: `@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`.
-- Use the `socks5://` scheme. 
--`socks5h://` is not supported by the current `httpx` version.
+- Use the `socks5://` scheme; `socks5h://` is not supported by the current `httpx` version.
 
 **Proxy in Docker.** Attach IndexBridge to the proxy's network and use the proxy container name and its internal port:
 
