@@ -695,7 +695,8 @@ def extract_audio_info(title: str, languages: List[str] = None) -> Dict:
 
 def extract_video_info(title: str) -> Dict:
     title_lower = title.lower()
-    video_info = {"codec": "h264", "codec_long": "H.264 / AVC (Advanced Video Coding)", "width": 1920, "height": 1080, "quality": 1080, "type": "sdr", "source": "web"}
+    # Разрешение по названию; если его в названии нет — 480, как у JacRed
+    video_info = {"codec": "h264", "codec_long": "H.264 / AVC (Advanced Video Coding)", "width": 640, "height": 480, "quality": 480, "type": "sdr", "source": "web"}
 
     if re.search(r'\b(?:hevc|h265|x265|h\.265)\b', title_lower): video_info["codec"] = "hevc"; video_info["codec_long"] = "H.265 / HEVC (High Efficiency Video Coding)"
     elif "av1" in title_lower: video_info["codec"] = "av1"; video_info["codec_long"] = "AV1 (AOMedia Video 1)"
